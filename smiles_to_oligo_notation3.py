@@ -695,17 +695,109 @@ def format_agilent(parsed):
     return "".join(parts)
 
 
+
+# ============================================================
+# KNOWN MODIFICATIONS (Thermo BioPharma Finder annotation table)
+# ============================================================
+KNOWN_BASES = {'A', 'G', 'C', 'U', 'T', 'I', 'H', 'D', 'S', 'N', 'B', 'Q'}
+KNOWN_2PRIME = {'d', 'r', 'm', 'f', 'e', 'h', 'a', 'n', 'o', 'y'}
+KNOWN_BACKBONE = {'p', 's', 't', 'y', 'x', 'n', 'e'}
+KNOWN_CONJUGATE_KEYWORDS = [
+    'ADS', 'HD', 'amino', 'GalNAc', 'biotin', 'cholesterol',
+    'ChTeg', 'LFA', 'Spermine', 'VP', 'C6amino', 'Gal1',
+    'TbcTeg', 'TGFBR1', 'Mpa', 'mCAP', 'cAG', 'cAU', 'cARCA',
+]
+
+
+# ============================================================
+# Alert collection for unknown/new modifications
+# ============================================================
+def collect_strand_alerts(parsed, strand_num=1):
+    """Check all parsed modifications against known Thermo table."""
+    alerts = []
+    nts = parsed['nucleotides']
+    ordered = parsed['ordered']
+    mol = parsed['mol']
+    sugar_like = parsed['sugar_like']
+
+    for pos, idx in enumerate(ordered):
+        n = nts[idx]
+        # Unknown base
+        if n['base'] not in KNOWN_BASES:
+            base_sym = n['base']
+            detail_msg = 'Base symbol ' + repr(base_sym) + ' is not in the Thermo annotation table. This may be a new nucleobase modification.'
+            alerts.append({
+                'strand': strand_num, 'position': pos + 1,
+                'type': 'Unknown Base', 'symbol': base_sym,
+                'detail': detail_msg,
+            })
+        # Unknown 2-prime sugar
+        if n['rib2'] not in KNOWN_2PRIME:
+            rib2_sym = n['rib2']
+            detail_msg = '2-prime sugar modification ' + repr(rib2_sym) + ' is not in the Thermo annotation table. This may be a new ribose modification.'
+            alerts.append({
+                'strand': strand_num, 'position': pos + 1,
+                'type': 'Unknown 2-prime Modification', 'symbol': rib2_sym,
+                'detail': detail_msg,
+            })
+        # Unknown backbone linker
+        if pos > 0:
+            prev_p3 = nts[ordered[pos - 1]]['p3']
+            lk = classify_thermo_linker(mol, prev_p3, exclude=sugar_like)
+            if lk and lk not in KNOWN_BACKBONE:
+                detail_msg = 'Backbone linker ' + repr(lk) + ' is not in the Thermo annotation table. This may be a new internucleotide linkage.'
+                alerts.append({
+                    'strand': strand_num, 'position': pos + 1,
+                    'type': 'Unknown Backbone Linker', 'symbol': lk,
+                    'detail': detail_msg,
+                })
+
+    # Check conjugates
+    for conj in parsed['conjugates']:
+        desc = conj.get('description', '')
+        is_known = any(kw.lower() in desc.lower()
+                       for kw in KNOWN_CONJUGATE_KEYWORDS)
+        if not is_known and desc:
+            formula_str = conj.get('formula', 'N/A')
+            detail_msg = 'Conjugate ' + repr(desc) + ' (Formula: ' + formula_str + ') does not match any known Thermo annotation. Please add it to the annotation table if confirmed.'
+            alerts.append({
+                'strand': strand_num,
+                'position': str(conj['position']) + ' (' + conj['location'] + ')',
+                'type': 'Unrecognized Conjugate',
+                'symbol': desc,
+                'detail': detail_msg,
+            })
+    return alerts
+
+
+def format_alerts(alerts):
+    """Format alerts into user-friendly display lines."""
+    if not alerts:
+        return ['  All modifications recognized - no alerts.']
+    lines = []
+    lines.append('  {} New/Unknown Modification(s) Detected:'.format(len(alerts)))
+    for i, a in enumerate(alerts, 1):
+        lines.append('')
+        lines.append('  [{}] Strand {}, Position {}: {}'.format(
+            i, a['strand'], a['position'], a['type']))
+        lines.append('      Symbol: {}'.format(a['symbol']))
+        lines.append('      -> {}'.format(a['detail']))
+    lines.append('')
+    lines.append('  Tip: If confirmed as valid, please update the annotation table.')
+    return lines
+
+
 # ============================================================
 # Top-level: parse + format everything
 # ============================================================
 def smiles_to_all(smiles_string):
-    strand_smiles = smiles_string.split(".")
+    strand_smiles = smiles_string.split('.')
     n_strands = len(strand_smiles)
 
     # Full product MW
     full_mol = Chem.MolFromSmiles(smiles_string)
     if full_mol is None:
-        raise ValueError("RDKit could not parse the SMILES string.")
+        raise ValueError('RDKit could not parse the SMILES string.')
     full_mono = Descriptors.ExactMolWt(full_mol)
     full_avg = Descriptors.MolWt(full_mol)
 
@@ -717,74 +809,88 @@ def smiles_to_all(smiles_string):
     # Sequences
     thermo_parts = [format_thermo(sd) for sd in strand_data]
     agilent_parts = [format_agilent(sd) for sd in strand_data]
-    thermo_str = ".".join(thermo_parts)
-    agilent_str = ".".join(agilent_parts)
+    thermo_str = '.'.join(thermo_parts)
+    agilent_str = '.'.join(agilent_parts)
 
     # MW summary
     mw_lines = []
-    mw_lines.append("  Full-Length Product:")
-    mw_lines.append(f"    Monoisotopic: {full_mono:.3f} Da")
-    mw_lines.append(f"    Average:      {full_avg:.2f} Da")
-    mw_lines.append("")
+    mw_lines.append('  Full-Length Product:')
+    mw_lines.append('    Monoisotopic: {:.3f} Da'.format(full_mono))
+    mw_lines.append('    Average:      {:.2f} Da'.format(full_avg))
+    mw_lines.append('')
     for i, sd in enumerate(strand_data):
-        label = f"Strand {i+1}"
+        label = 'Strand {}'.format(i + 1)
         if n_strands == 2:
-            label += " (sense)" if i == 0 else " (antisense)"
-        mw_lines.append(f"  {label}  ({sd['n_nucleotides']} nt):")
-        mw_lines.append(f"    Monoisotopic: {sd['mono_mw']:.3f} Da")
-        mw_lines.append(f"    Average:      {sd['avg_mw']:.2f} Da")
+            label += ' (sense)' if i == 0 else ' (antisense)'
+        mw_lines.append('  {}  ({} nt):'.format(label, sd['n_nucleotides']))
+        mw_lines.append('    Monoisotopic: {:.3f} Da'.format(sd['mono_mw']))
+        mw_lines.append('    Average:      {:.2f} Da'.format(sd['avg_mw']))
 
     # Conjugates
     conj_lines = []
     all_conj = []
     for i, sd in enumerate(strand_data):
-        for c in sd["conjugates"]:
-            c["strand"] = i + 1
+        for c in sd['conjugates']:
+            c['strand'] = i + 1
             all_conj.append(c)
     if all_conj:
         for c in all_conj:
-            prefix = f"Strand {c['strand']}, " if n_strands > 1 else ""
-            conj_lines.append(f"  {prefix}Position {c['position']} ({c['location']}): {c['formula']}")
-            conj_lines.append(f"    Description:  {c['description']}")
-            conj_lines.append(f"    Monoisotopic: {c['mono_mw']:.3f} Da")
-            conj_lines.append(f"    Average:      {c['avg_mw']:.2f} Da")
+            prefix = 'Strand {}, '.format(c['strand']) if n_strands > 1 else ''
+            conj_lines.append('  {}Position {} ({}): {}'.format(
+                prefix, c['position'], c['location'], c['formula']))
+            conj_lines.append('    Description:  {}'.format(c['description']))
+            conj_lines.append('    Monoisotopic: {:.3f} Da'.format(c['mono_mw']))
+            conj_lines.append('    Average:      {:.2f} Da'.format(c['avg_mw']))
     else:
-        conj_lines.append("  None detected")
+        conj_lines.append('  None detected')
 
-    return thermo_str, agilent_str, mw_lines, conj_lines
+    # Alerts - check for unknown/new modifications
+    all_alerts = []
+    for i, sd in enumerate(strand_data):
+        all_alerts.extend(collect_strand_alerts(sd, strand_num=i + 1))
+    alert_lines = format_alerts(all_alerts)
+
+    return thermo_str, agilent_str, mw_lines, conj_lines, alert_lines
 
 
 # ============================================================
 # Main
 # ============================================================
-if __name__ == "__main__":
+if __name__ == '__main__':
     if len(sys.argv) > 1:
         SMILES = sys.argv[1]
     else:
-        print("=" * 60)
-        print("SMILES to Oligonucleotide Shorthand Converter")
-        print("=" * 60)
+        print('=' * 60)
+        print('SMILES to Oligonucleotide Shorthand Converter')
+        print('=' * 60)
         print("Paste SMILES (single or duplex with '.') then press Enter:")
-        SMILES = input("SMILES> ").strip()
+        SMILES = input('SMILES> ').strip()
 
     if not SMILES:
-        print("Error: No SMILES provided.")
+        print('Error: No SMILES provided.')
         sys.exit(1)
 
-    thermo, agilent, mw_lines, conj_lines = smiles_to_all(SMILES)
+    thermo, agilent, mw_lines, conj_lines, alert_lines = smiles_to_all(SMILES)
 
     print()
-    print(f"Thermo BioPharma Finder Sequence: {thermo}")
-    print(f"Agilent BioConfirm Sequence:      {agilent}")
+    print('Thermo BioPharma Finder Sequence: {}'.format(thermo))
+    print('Agilent BioConfirm Sequence:      {}'.format(agilent))
     print()
-    print("=" * 60)
-    print("MOLECULAR WEIGHT SUMMARY")
-    print("=" * 60)
+    print('=' * 60)
+    print('MOLECULAR WEIGHT SUMMARY')
+    print('=' * 60)
     for line in mw_lines:
         print(line)
     print()
-    print("=" * 60)
-    print("CONJUGATE(S)")
-    print("=" * 60)
+    print('=' * 60)
+    print('CONJUGATE(S)')
+    print('=' * 60)
     for line in conj_lines:
         print(line)
+    print()
+    print('=' * 60)
+    print('MODIFICATION CHECK')
+    print('=' * 60)
+    for line in alert_lines:
+        print(line)
+

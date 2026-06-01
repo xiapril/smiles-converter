@@ -1,0 +1,12 @@
+{
+    "https://posit-connect.am.lilly.com": {
+        "server_url": "https://posit-connect.am.lilly.com",
+        "filename": "W:\\April\\SMILE_Converter",
+        "app_url": "https://posit-connect.am.lilly.com/content/185a0e06-f76f-47dc-b7b1-03135f6a1c74/",
+        "app_id": "7621",
+        "app_guid": "185a0e06-f76f-47dc-b7b1-03135f6a1c74",
+        "title": "SMILES to Oligo Notation",
+        "app_mode": "python-streamlit",
+        "app_store_version": 1
+    }
+}

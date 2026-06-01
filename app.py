@@ -214,7 +214,7 @@ with btn_col:
 # ============================================================
 if analyze and smiles_input and smiles_input.strip():
     try:
-        thermo, agilent, mw_lines, conj_lines = smiles_to_all(smiles_input.strip())
+        thermo, agilent, mw_lines, conj_lines, alert_lines = smiles_to_all(smiles_input.strip())
 
         st.markdown('<div class="success-banner">✅ Analysis complete!</div>',
                     unsafe_allow_html=True)
@@ -305,6 +305,27 @@ if analyze and smiles_input and smiles_input.strip():
 
         conj_html += '</div>'
         st.markdown(conj_html, unsafe_allow_html=True)
+# ---- Modification Check ----
+        alert_html = '<div class="result-card">'
+        alert_html += '<div class="card-header">🔍 Modification Check</div>'
+        for line in alert_lines:
+            ls = line.strip()
+            if not ls:
+                continue
+            if 'All modifications recognized' in ls:
+                alert_html += '<div class="conj-badge" style="background:linear-gradient(135deg,#e8ffe8,#f0fff4);border-color:#c3e6c3;color:#2e7d32;">' + ls + '</div>'
+            elif 'New/Unknown' in ls:
+                alert_html += '<div style="color:#d32f2f;font-weight:600;font-size:0.95rem;">' + ls + '</div>'
+            elif ls.startswith('['):
+                alert_html += '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:0.5rem 0.8rem;margin:0.4rem 0;font-size:0.85rem;color:#7f1d1d;">' + ls + '</div>'
+            elif ls.startswith('Symbol:'):
+                alert_html += '<div style="margin-left:1rem;font-size:0.82rem;color:#991b1b;font-weight:500;">' + ls + '</div>'
+            elif ls.startswith('->'):
+                alert_html += '<div style="margin-left:1rem;font-size:0.82rem;color:#7a6090;">' + ls + '</div>'
+            elif 'Tip' in ls:
+                alert_html += '<div style="font-style:italic;color:#9080b8;font-size:0.82rem;margin-top:0.5rem;">' + ls + '</div>'
+        alert_html += '</div>'
+        st.markdown(alert_html, unsafe_allow_html=True)        
 
     except Exception as e:
         st.error(f"❌ Error analyzing SMILES: {str(e)}")
@@ -317,6 +338,6 @@ elif analyze:
 # ============================================================
 st.markdown(
     '<p class="footer-text">Built with ❤️ by April Xia · '
-    'LGM Oligonucleotide Analytics · Powered by RDKit + Streamlit</p>',
+    'LGM Analytical Team · Powered by RDKit + Streamlit</p>',
     unsafe_allow_html=True,
 )
